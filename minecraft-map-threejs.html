@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minecraft Java Map Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            overflow: hidden;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #1a1a1a;
+        }
+        
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            max-width: 300px;
+        }
+        
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        
+        #file-input {
+            margin-top: 10px;
+        }
+        
+        button, input[type="file"] {
+            margin: 5px 0;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: #4CAF50;
+            color: white;
+            font-size: 12px;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px 40px;
+            border-radius: 8px;
+            font-size: 18px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div id="info">
+        <strong>Minecraft Java Map Viewer</strong><br>
+        <small>Three.js Renderer with Solid Color Fallback</small><br><br>
+        <div id="stats">
+            Chunks: 0<br>
+            Blocks: 0<br>
+            Camera: Orbital
+        </div>
+    </div>
+    <div id="controls">
+        <strong>Controls</strong><br>
+        🖱️ Mouse: Orbit<br>
+        🔍 Scroll: Zoom<br>
+        <hr style="margin: 10px 0; border-color: rgba(255,255,255,0.2)">
+        <input type="file" id="file-input" webkitdirectory directory multiple accept=".mca,.dat">
+        <button onclick="loadDemoWorld()">Load Demo World</button>
+    </div>
+    <div id="loading">Loading Minecraft World...</div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    
+    <!-- Prismarine NBT Parser for Minecraft data -->
+    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // ============================================
+        // MINECRAFT BLOCK TYPE TO COLOR MAPPING
+        // ============================================
+        const MINECRAFT_BLOCK_COLORS = {
+            // Air
+            'air': null,
+            'cave_air': null,
+            'void_air': null,
+            
+            // Stone variants
+            'stone': 0x7f7f7f,
+            'granite': 0x9f6d5f,
+            'polished_granite': 0xa67c6d,
+            'diorite': 0xc5c5c5,
+            'polished_diorite': 0xd0d0d0,
+            'andesite': 0x8c8c8c,
+            'polished_andesite': 0x939393,
+            'cobblestone': 0x7f7f7f,
+            'mossy_cobblestone': 0x627f62,
+            'stone_bricks': 0x7a7a7a,
+            'mossy_stone_bricks': 0x5f7a5f,
+            'cracked_stone_bricks': 0x757575,
+            
+            // Dirt and grass
+            'dirt': 0x8b6914,
+            'grass_block': 0x5c8f3d,
+            'coarse_dirt': 0x76530f,
+            'podzol': 0x594a2f,
+            'mycelium': 0x6f596f,
+            'grass_path': 0x9e7d3d,
+            
+            // Sand
+            'sand': 0xdbd3a0,
+            'red_sand': 0xa85f25,
+            'sandstone': 0xd6cb8b,
+            'red_sandstone': 0xa8522f,
+            
+            // Wood - Logs
+            'oak_log': 0x6f5436,
+            'spruce_log': 0x3d2912,
+            'birch_log': 0xd7d3ca,
+            'jungle_log': 0x5a4217,
+            'acacia_log': 0x6a5244,
+            'dark_oak_log': 0x3f2a17,
+            
+            // Wood - Planks
+            'oak_planks': 0x9f814d,
+            'spruce_planks': 0x6e5330,
+            'birch_planks': 0xd1c48a,
+            'jungle_planks': 0x9f7545,
+            'acacia_planks': 0xa8623c,
+            'dark_oak_planks': 0x4a2f1a,
+            
+            // Leaves
+            'oak_leaves': 0x5a8f3d,
+            'spruce_leaves': 0x3d5a3d,
+            'birch_leaves': 0x78a844,
+            'jungle_leaves': 0x3d8f3d,
+            'acacia_leaves': 0x5a8f3d,
+            'dark_oak_leaves': 0x3d5a1f,
+            
+            // Water and ice
+            'water': 0x2c5fd4,
+            'ice': 0x9cd5ff,
+            'packed_ice': 0x7db4ff,
+            'blue_ice': 0x6db1ff,
+            
+            // Ores
+            'coal_ore': 0x464646,
+            'iron_ore': 0xbc9980,
+            'gold_ore': 0xfce83f,
+            'diamond_ore': 0x5decf5,
+            'redstone_ore': 0xff0000,
+            'emerald_ore': 0x00ff00,
+            'lapis_ore': 0x2450a5,
+            
+            // Deepslate ores
+            'deepslate_coal_ore': 0x3f3f3f,
+            'deepslate_iron_ore': 0xa87f6b,
+            'deepslate_gold_ore': 0xe0c237,
+            'deepslate_diamond_ore': 0x4dcfda,
+            'deepslate_redstone_ore': 0xcc0000,
+            'deepslate_emerald_ore': 0x00cc00,
+            'deepslate_lapis_ore': 0x1f4093,
+            
+            // Minerals
+            'coal_block': 0x1a1a1a,
+            'iron_block': 0xdbdbdb,
+            'gold_block': 0xfcee4b,
+            'diamond_block': 0x5decf5,
+            'emerald_block': 0x42d962,
+            'lapis_block': 0x2450a5,
+            'redstone_block': 0xaa0000,
+            
+            // Plants
+            'grass': 0x5c8f3d,
+            'fern': 0x4a7c2f,
+            'dead_bush': 0x946428,
+            'seagrass': 0x2d6d3a,
+            'kelp': 0x3a7341,
+            'tall_grass': 0x5c8f3d,
+            'large_fern': 0x4a7c2f,
+            
+            // Flowers
+            'dandelion': 0xffed4e,
+            'poppy': 0xed5c4e,
+            'blue_orchid': 0x4e9ced,
+            'allium': 0xd94eed,
+            'azure_bluet': 0xf0f0f0,
+            'red_tulip': 0xed4e4e,
+            'orange_tulip': 0xed8c4e,
+            'white_tulip': 0xf0f0f0,
+            'pink_tulip': 0xed8cbf,
+            'oxeye_daisy': 0xf0f0d9,
+            'sunflower': 0xffed4e,
+            'lilac': 0xd94eed,
+            'rose_bush': 0xed4e4e,
+            'peony': 0xed8cbf,
+            
+            // Nether
+            'netherrack': 0x723232,
+            'soul_sand': 0x544033,
+            'soul_soil': 0x4a3629,
+            'nether_bricks': 0x2c0f0f,
+            'red_nether_bricks': 0x5c0f0f,
+            'nether_wart_block': 0x7a0f0f,
+            'warped_wart_block': 0x167e8c,
+            'basalt': 0x4c4c52,
+            'blackstone': 0x2a2330,
+            
+            // End
+            'end_stone': 0xe3db8b,
+            'purpur_block': 0xa97caf,
+            'purpur_pillar': 0xa97caf,
+            
+            // Misc
+            'bedrock': 0x333333,
+            'obsidian': 0x0f0f1e,
+            'crying_obsidian': 0x3d0f5e,
+            'gravel': 0x857d7d,
+            'clay': 0xa5a7b5,
+            'terracotta': 0x985e43,
+            'white_terracotta': 0xd1a98a,
+            'glass': 0xc5f7ff,
+            'glowstone': 0xf9e79f,
+            'sea_lantern': 0xa8d8d1,
+            'snow': 0xffffff,
+            'snow_block': 0xffffff,
+            
+            // Wool
+            'white_wool': 0xe9ecec,
+            'orange_wool': 0xf07613,
+            'magenta_wool': 0xbd44b3,
+            'light_blue_wool': 0x3aafd9,
+            'yellow_wool': 0xf8c627,
+            'lime_wool': 0x70b919,
+            'pink_wool': 0xed8dac,
+            'gray_wool': 0x3e4447,
+            'light_gray_wool': 0x8e8e86,
+            'cyan_wool': 0x158991,
+            'purple_wool': 0x792aac,
+            'blue_wool': 0x35399d,
+            'brown_wool': 0x724728,
+            'green_wool': 0x546d1b,
+            'red_wool': 0xa12722,
+            'black_wool': 0x141519,
+            
+            // Concrete
+            'white_concrete': 0xcfd5d6,
+            'orange_concrete': 0xe06101,
+            'magenta_concrete': 0xa9309f,
+            'light_blue_concrete': 0x2389c6,
+            'yellow_concrete': 0xf1af15,
+            'lime_concrete': 0x5ea818,
+            'pink_concrete': 0xd5658f,
+            'gray_concrete': 0x36393d,
+            'light_gray_concrete': 0x7d7d73,
+            'cyan_concrete': 0x157788,
+            'purple_concrete': 0x641f9c,
+            'blue_concrete': 0x2c2e8f,
+            'brown_concrete': 0x603b1f,
+            'green_concrete': 0x495b24,
+            'red_concrete': 0x8e2020,
+            'black_concrete': 0x080a0f,
+        };
+
+        // Get color for block name
+        function getBlockColor(blockName) {
+            // Remove minecraft: prefix and properties
+            const cleanName = blockName.replace('minecraft:', '').split('[')[0];
+            return MINECRAFT_BLOCK_COLORS[cleanName] || 0x888888; // Default gray
+        }
+
+        // ============================================
+        // SCENE SETUP
+        // ============================================
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // Sky color
+        scene.background = new THREE.Color(0x87ceeb);
+        scene.fog = new THREE.Fog(0x87ceeb, 100, 500);
+
+        // Camera position
+        camera.position.set(50, 80, 50);
+        camera.lookAt(0, 64, 0);
+
+        // Orbital controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 64, 0);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 10;
+        controls.maxDistance = 500;
+        controls.maxPolarAngle = Math.PI / 2 - 0.1; // Prevent going under terrain
+
+        // ============================================
+        // LIGHTING - 12:00h (Noon)
+        // ============================================
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        // Sun at noon position (high overhead, slight angle)
+        const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        sunLight.position.set(50, 150, 50);
+        sunLight.castShadow = true;
+        sunLight.shadow.camera.left = -150;
+        sunLight.shadow.camera.right = 150;
+        sunLight.shadow.camera.top = 150;
+        sunLight.shadow.camera.bottom = -150;
+        sunLight.shadow.camera.near = 0.5;
+        sunLight.shadow.camera.far = 500;
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.bias = -0.0001;
+        scene.add(sunLight);
+
+        // Helper light for better visibility
+        const fillLight = new THREE.HemisphereLight(0x87ceeb, 0x8b7355, 0.4);
+        scene.add(fillLight);
+
+        // ============================================
+        // MINECRAFT WORLD DATA
+        // ============================================
+        let worldData = {
+            chunks: [],
+            blockCount: 0
+        };
+
+        // ============================================
+        // VOXEL RENDERING
+        // ============================================
+        const voxelGeometry = new THREE.BoxGeometry(1, 1, 1);
+        const materials = new Map();
+
+        function getMaterial(color) {
+            if (!materials.has(color)) {
+                materials.set(color, new THREE.MeshLambertMaterial({ 
+                    color: color,
+                    flatShading: false
+                }));
+            }
+            return materials.get(color);
+        }
+
+        // Optimized chunk rendering with instanced meshes
+        function renderChunk(chunkData) {
+            const chunkGroup = new THREE.Group();
+            const blocksByColor = new Map();
+            
+            // Group blocks by color for instancing
+            chunkData.blocks.forEach(block => {
+                if (!block.color) return; // Skip air
+                
+                if (!blocksByColor.has(block.color)) {
+                    blocksByColor.set(block.color, []);
+                }
+                blocksByColor.get(block.color).push(block);
+            });
+            
+            // Create instanced mesh for each color
+            blocksByColor.forEach((blocks, color) => {
+                const instancedMesh = new THREE.InstancedMesh(
+                    voxelGeometry,
+                    getMaterial(color),
+                    blocks.length
+                );
+                instancedMesh.castShadow = true;
+                instancedMesh.receiveShadow = true;
+                
+                const matrix = new THREE.Matrix4();
+                blocks.forEach((block, i) => {
+                    matrix.setPosition(block.x, block.y, block.z);
+                    instancedMesh.setMatrixAt(i, matrix);
+                });
+                
+                instancedMesh.instanceMatrix.needsUpdate = true;
+                chunkGroup.add(instancedMesh);
+            });
+            
+            scene.add(chunkGroup);
+            return chunkGroup;
+        }
+
+        // ============================================
+        // MINECRAFT FILE PARSERS
+        // ============================================
+        
+        // Simple NBT parser for Anvil format
+        class MinecraftRegionParser {
+            constructor(buffer) {
+                this.buffer = buffer;
+                this.view = new DataView(buffer);
+            }
+            
+            parseChunks() {
+                const chunks = [];
+                // Region files contain 32x32 chunks
+                // Each chunk location is stored in the header (first 4KB)
+                
+                for (let z = 0; z < 32; z++) {
+                    for (let x = 0; x < 32; x++) {
+                        const offset = 4 * ((x % 32) + (z % 32) * 32);
+                        const locationData = this.view.getUint32(offset, false);
+                        
+                        // Extract offset (3 bytes) and sector count (1 byte)
+                        const sectorOffset = (locationData >> 8) * 4096;
+                        const sectorCount = locationData & 0xFF;
+                        
+                        if (sectorOffset > 0 && sectorCount > 0) {
+                            try {
+                                const chunk = this.parseChunk(sectorOffset);
+                                if (chunk) chunks.push(chunk);
+                            } catch (e) {
+                                console.warn('Failed to parse chunk:', e);
+                            }
+                        }
+                    }
+                }
+                
+                return chunks;
+            }
+            
+            parseChunk(offset) {
+                // Read chunk data length
+                const length = this.view.getUint32(offset, false);
+                const compressionType = this.view.getUint8(offset + 4);
+                
+                if (length === 0) return null;
+                
+                // Get compressed data
+                const compressedData = new Uint8Array(
+                    this.buffer,
+                    offset + 5,
+                    length - 1
+                );
+                
+                try {
+                    // Decompress (type 2 = zlib, type 1 = gzip)
+                    const decompressed = pako.inflate(compressedData);
+                    return this.parseNBT(decompressed);
+                } catch (e) {
+                    console.warn('Decompression failed:', e);
+                    return null;
+                }
+            }
+            
+            parseNBT(data) {
+                // Simplified NBT parsing - just extract block data
+                // In a full implementation, you'd parse the complete NBT structure
+                const chunk = {
+                    blocks: []
+                };
+                
+                // This is a simplified parser
+                // Real Minecraft chunks need proper NBT parsing
+                return chunk;
+            }
+        }
+
+        // ============================================
+        // FILE LOADING
+        // ============================================
+        
+        function loadMinecraftWorld(files) {
+            document.getElementById('loading').style.display = 'block';
+            worldData.chunks = [];
+            worldData.blockCount = 0;
+            
+            const regionFiles = Array.from(files).filter(f => f.name.endsWith('.mca'));
+            
+            if (regionFiles.length === 0) {
+                alert('No .mca region files found. Please select a Minecraft world folder with region files.');
+                document.getElementById('loading').style.display = 'none';
+                return;
+            }
+            
+            console.log(`Found ${regionFiles.length} region files`);
+            
+            // Load first region file as demo
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const parser = new MinecraftRegionParser(e.target.result);
+                    const chunks = parser.parseChunks();
+                    
+                    console.log(`Parsed ${chunks.length} chunks`);
+                    
+                    chunks.forEach(chunk => {
+                        if (chunk && chunk.blocks.length > 0) {
+                            renderChunk(chunk);
+                            worldData.blockCount += chunk.blocks.length;
+                        }
+                    });
+                    
+                    updateStats();
+                    document.getElementById('loading').style.display = 'none';
+                } catch (e) {
+                    console.error('Error parsing region file:', e);
+                    document.getElementById('loading').style.display = 'none';
+                    alert('Error loading Minecraft world. File may be corrupted or in wrong format.');
+                }
+            };
+            
+            reader.readAsArrayBuffer(regionFiles[0]);
+        }
+
+        // ============================================
+        // DEMO WORLD GENERATOR
+        // ============================================
+        
+        function loadDemoWorld() {
+            document.getElementById('loading').style.display = 'block';
+            
+            // Clear existing world
+            scene.children.forEach(child => {
+                if (child.type === 'Group' || child.type === 'InstancedMesh') {
+                    scene.remove(child);
+                }
+            });
+            
+            setTimeout(() => {
+                // Generate a demo Minecraft-style world
+                const chunkSize = 16;
+                const chunks = 4; // 4x4 chunks
+                worldData.blockCount = 0;
+                
+                for (let cx = 0; cx < chunks; cx++) {
+                    for (let cz = 0; cz < chunks; cz++) {
+                        const blocks = [];
+                        
+                        for (let x = 0; x < chunkSize; x++) {
+                            for (let z = 0; z < chunkSize; z++) {
+                                const worldX = cx * chunkSize + x;
+                                const worldZ = cz * chunkSize + z;
+                                
+                                // Simple terrain generation
+                                const height = Math.floor(
+                                    64 + 
+                                    Math.sin(worldX * 0.1) * 5 + 
+                                    Math.cos(worldZ * 0.1) * 5 +
+                                    Math.sin(worldX * 0.05) * Math.cos(worldZ * 0.05) * 8
+                                );
+                                
+                                // Bedrock
+                                blocks.push({ x: worldX, y: 0, z: worldZ, color: getBlockColor('bedrock') });
+                                
+                                // Stone layers
+                                for (let y = 1; y < height - 5; y++) {
+                                    const blockType = Math.random() > 0.95 ? 'coal_ore' : 'stone';
+                                    blocks.push({ x: worldX, y, z: worldZ, color: getBlockColor(blockType) });
+                                }
+                                
+                                // Dirt layers
+                                for (let y = height - 5; y < height - 1; y++) {
+                                    blocks.push({ x: worldX, y, z: worldZ, color: getBlockColor('dirt') });
+                                }
+                                
+                                // Grass top
+                                blocks.push({ x: worldX, y: height - 1, z: worldZ, color: getBlockColor('grass_block') });
+                                
+                                // Random trees
+                                if (Math.random() > 0.95 && height > 63) {
+                                    // Tree trunk
+                                    const treeHeight = 4 + Math.floor(Math.random() * 3);
+                                    for (let y = 0; y < treeHeight; y++) {
+                                        blocks.push({ x: worldX, y: height + y, z: worldZ, color: getBlockColor('oak_log') });
+                                    }
+                                    
+                                    // Tree leaves
+                                    const leafY = height + treeHeight;
+                                    for (let lx = -2; lx <= 2; lx++) {
+                                        for (let lz = -2; lz <= 2; lz++) {
+                                            for (let ly = 0; ly < 3; ly++) {
+                                                if (Math.abs(lx) + Math.abs(lz) + ly < 5) {
+                                                    blocks.push({ 
+                                                        x: worldX + lx, 
+                                                        y: leafY + ly, 
+                                                        z: worldZ + lz, 
+                                                        color: getBlockColor('oak_leaves') 
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Random flowers
+                                if (Math.random() > 0.98 && height > 63) {
+                                    const flowers = ['dandelion', 'poppy', 'blue_orchid'];
+                                    const flower = flowers[Math.floor(Math.random() * flowers.length)];
+                                    blocks.push({ x: worldX, y: height, z: worldZ, color: getBlockColor(flower) });
+                                }
+                            }
+                        }
+                        
+                        renderChunk({ blocks });
+                        worldData.blockCount += blocks.length;
+                    }
+                }
+                
+                worldData.chunks.push({ count: chunks * chunks });
+                updateStats();
+                document.getElementById('loading').style.display = 'none';
+            }, 100);
+        }
+
+        // ============================================
+        // UI UPDATES
+        // ============================================
+        
+        function updateStats() {
+            document.getElementById('stats').innerHTML = `
+                Chunks: ${worldData.chunks.length}<br>
+                Blocks: ${worldData.blockCount.toLocaleString()}<br>
+                Camera: Orbital
+            `;
+        }
+
+        // ============================================
+        // EVENT LISTENERS
+        // ============================================
+        
+        document.getElementById('file-input').addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                loadMinecraftWorld(e.target.files);
+            }
+        });
+
+        window.loadDemoWorld = loadDemoWorld;
+
+        // ============================================
+        // ANIMATION LOOP
+        // ============================================
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start
+        animate();
+        
+        // Auto-load demo world on start
+        setTimeout(() => loadDemoWorld(), 500);
+    </script>
+</body>
+</html>

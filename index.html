@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxel Forest Scene</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div id="info">
+        <strong>Voxel Forest Scene</strong><br>
+        Use mouse to orbit | Scroll to zoom
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // Camera position - isometric-like angle similar to the image
+        camera.position.set(25, 18, 25);
+        camera.lookAt(0, 5, 0);
+
+        // Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 5, 0);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        // Fog for mystical atmosphere
+        scene.fog = new THREE.Fog(0x4a9999, 20, 60);
+        scene.background = new THREE.Color(0x5ab3b3);
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0x6ab3b3, 0.6);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(10, 20, 10);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.camera.left = -30;
+        directionalLight.shadow.camera.right = 30;
+        directionalLight.shadow.camera.top = 30;
+        directionalLight.shadow.camera.bottom = -30;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        scene.add(directionalLight);
+
+        // Voxel size
+        const VOXEL_SIZE = 1;
+
+        // Create voxel geometry (reusable)
+        const voxelGeometry = new THREE.BoxGeometry(VOXEL_SIZE, VOXEL_SIZE, VOXEL_SIZE);
+
+        // Materials
+        const materials = {
+            grass: new THREE.MeshLambertMaterial({ color: 0x4a7c3d }),
+            darkGrass: new THREE.MeshLambertMaterial({ color: 0x3a5f2d }),
+            moss: new THREE.MeshLambertMaterial({ color: 0x5a8a4d }),
+            water: new THREE.MeshLambertMaterial({ color: 0x4a9999, transparent: true, opacity: 0.7 }),
+            dirt: new THREE.MeshLambertMaterial({ color: 0x6b4423 }),
+            woodDark: new THREE.MeshLambertMaterial({ color: 0x4a3422 }),
+            woodLight: new THREE.MeshLambertMaterial({ color: 0x6b5433 }),
+            leaves: new THREE.MeshLambertMaterial({ color: 0x2d4a2d }),
+            leavesLight: new THREE.MeshLambertMaterial({ color: 0x3d5a3d }),
+            vine: new THREE.MeshLambertMaterial({ color: 0x3a4a2d }),
+            stone: new THREE.MeshLambertMaterial({ color: 0x5a5a5a }),
+            glowYellow: new THREE.MeshBasicMaterial({ color: 0xffeb3b }),
+        };
+
+        // Helper function to create a voxel
+        function createVoxel(x, y, z, material) {
+            const mesh = new THREE.Mesh(voxelGeometry, material);
+            mesh.position.set(x, y, z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            return mesh;
+        }
+
+        // Create terrain base
+        function createTerrain() {
+            const terrainGroup = new THREE.Group();
+            
+            // Water base layer
+            for (let x = -20; x < 20; x++) {
+                for (let z = -20; z < 20; z++) {
+                    terrainGroup.add(createVoxel(x, -0.5, z, materials.water));
+                }
+            }
+
+            // Elevated terrain patches with organic shapes
+            const terrainHeightMap = [
+                // Center elevated area
+                { x: 0, z: 0, height: 3, radius: 5 },
+                { x: -8, z: -6, height: 4, radius: 4 },
+                { x: 10, z: -5, height: 3, radius: 4 },
+                { x: -5, z: 8, height: 2, radius: 3 },
+                { x: 8, z: 10, height: 3, radius: 3 },
+            ];
+
+            terrainHeightMap.forEach(area => {
+                for (let x = -area.radius; x <= area.radius; x++) {
+                    for (let z = -area.radius; z <= area.radius; z++) {
+                        const distance = Math.sqrt(x * x + z * z);
+                        if (distance < area.radius) {
+                            const heightFactor = 1 - (distance / area.radius);
+                            const height = Math.floor(area.height * heightFactor);
+                            
+                            for (let y = 0; y < height; y++) {
+                                const mat = y === height - 1 ? materials.grass : materials.dirt;
+                                terrainGroup.add(createVoxel(area.x + x, y, area.z + z, mat));
+                            }
+                            
+                            // Add moss patches randomly
+                            if (Math.random() > 0.7 && height > 0) {
+                                terrainGroup.add(createVoxel(area.x + x, height, area.z + z, materials.moss));
+                            }
+                        }
+                    }
+                }
+            });
+
+            return terrainGroup;
+        }
+
+        // Create a tree trunk
+        function createTreeTrunk(x, z, height, thickness = 1) {
+            const trunkGroup = new THREE.Group();
+            
+            for (let y = 0; y < height; y++) {
+                for (let dx = 0; dx < thickness; dx++) {
+                    for (let dz = 0; dz < thickness; dz++) {
+                        const mat = Math.random() > 0.5 ? materials.woodDark : materials.woodLight;
+                        trunkGroup.add(createVoxel(x + dx, y, z + dz, mat));
+                    }
+                }
+            }
+            
+            return trunkGroup;
+        }
+
+        // Create tree foliage
+        function createTreeFoliage(x, y, z, radius) {
+            const foliageGroup = new THREE.Group();
+            
+            // Layered canopy
+            for (let layer = 0; layer < 4; layer++) {
+                const layerRadius = radius - layer * 0.5;
+                const layerY = y + layer;
+                
+                for (let dx = -layerRadius; dx <= layerRadius; dx++) {
+                    for (let dz = -layerRadius; dz <= layerRadius; dz++) {
+                        const distance = Math.sqrt(dx * dx + dz * dz);
+                        if (distance < layerRadius && Math.random() > 0.2) {
+                            const mat = Math.random() > 0.6 ? materials.leavesLight : materials.leaves;
+                            foliageGroup.add(createVoxel(x + dx, layerY, z + dz, mat));
+                        }
+                    }
+                }
+            }
+            
+            // Hanging vines
+            for (let i = 0; i < 5; i++) {
+                const vineX = x + Math.floor(Math.random() * radius * 2 - radius);
+                const vineZ = z + Math.floor(Math.random() * radius * 2 - radius);
+                const vineLength = Math.floor(Math.random() * 3) + 2;
+                
+                for (let j = 0; j < vineLength; j++) {
+                    foliageGroup.add(createVoxel(vineX, y - j - 1, vineZ, materials.vine));
+                }
+            }
+            
+            return foliageGroup;
+        }
+
+        // Create a complete tree
+        function createTree(x, z, height, foliageRadius) {
+            const treeGroup = new THREE.Group();
+            
+            const trunk = createTreeTrunk(x, 1, height, Math.random() > 0.5 ? 2 : 1);
+            const foliage = createTreeFoliage(x, height + 1, z, foliageRadius);
+            
+            treeGroup.add(trunk);
+            treeGroup.add(foliage);
+            
+            return treeGroup;
+        }
+
+        // Add trees to scene
+        function populateForest() {
+            const forestGroup = new THREE.Group();
+            
+            const treePositions = [
+                // Large trees
+                { x: -8, z: -6, height: 12, radius: 5 },
+                { x: 10, z: -5, height: 14, radius: 5 },
+                { x: -5, z: 8, height: 10, radius: 4 },
+                { x: 15, z: 3, height: 13, radius: 5 },
+                { x: -12, z: 5, height: 11, radius: 4 },
+                
+                // Medium trees
+                { x: 3, z: 2, height: 8, radius: 3 },
+                { x: -2, z: -8, height: 9, radius: 3 },
+                { x: 7, z: 12, height: 7, radius: 3 },
+                { x: -15, z: -2, height: 8, radius: 3 },
+                
+                // Small trees
+                { x: 5, z: 6, height: 6, radius: 2 },
+                { x: -3, z: 3, height: 5, radius: 2 },
+                { x: 12, z: 8, height: 6, radius: 2 },
+            ];
+            
+            treePositions.forEach(tree => {
+                forestGroup.add(createTree(tree.x, tree.z, tree.height, tree.radius));
+            });
+            
+            return forestGroup;
+        }
+
+        // Create glowing particles
+        function createParticles() {
+            const particlesGeometry = new THREE.BufferGeometry();
+            const particlesCount = 200;
+            const positions = new Float32Array(particlesCount * 3);
+            
+            for (let i = 0; i < particlesCount * 3; i += 3) {
+                positions[i] = (Math.random() - 0.5) * 40;
+                positions[i + 1] = Math.random() * 20;
+                positions[i + 2] = (Math.random() - 0.5) * 40;
+            }
+            
+            particlesGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            
+            const particlesMaterial = new THREE.PointsMaterial({
+                color: 0xffeb3b,
+                size: 0.15,
+                transparent: true,
+                opacity: 0.8,
+                blending: THREE.AdditiveBlending,
+            });
+            
+            const particles = new THREE.Points(particlesGeometry, particlesMaterial);
+            return particles;
+        }
+
+        // Add glowing light orbs
+        function createLightOrbs() {
+            const orbGroup = new THREE.Group();
+            
+            // Create small glowing cubes as light sources
+            const orbPositions = [
+                { x: -7, y: 2, z: -5 },
+                { x: 3, y: 3, z: 2 },
+                { x: -2, y: 2, z: 8 },
+                { x: 10, y: 4, z: -3 },
+            ];
+            
+            orbPositions.forEach(pos => {
+                const orb = createVoxel(pos.x, pos.y, pos.z, materials.glowYellow);
+                orbGroup.add(orb);
+                
+                // Add point light
+                const light = new THREE.PointLight(0xffeb3b, 1, 8);
+                light.position.set(pos.x, pos.y, pos.z);
+                orbGroup.add(light);
+            });
+            
+            return orbGroup;
+        }
+
+        // Build the scene
+        const terrain = createTerrain();
+        const forest = populateForest();
+        const particles = createParticles();
+        const lightOrbs = createLightOrbs();
+
+        scene.add(terrain);
+        scene.add(forest);
+        scene.add(particles);
+        scene.add(lightOrbs);
+
+        // Animation
+        let time = 0;
+        function animate() {
+            requestAnimationFrame(animate);
+            time += 0.01;
+            
+            // Animate particles
+            const positions = particles.geometry.attributes.position.array;
+            for (let i = 1; i < positions.length; i += 3) {
+                positions[i] += Math.sin(time + i) * 0.01;
+                if (positions[i] > 20) positions[i] = 0;
+            }
+            particles.geometry.attributes.position.needsUpdate = true;
+            particles.rotation.y += 0.0005;
+            
+            // Update controls
+            controls.update();
+            
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start animation
+        animate();
+    </script>
+</body>
+</html>
