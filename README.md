@@ -1,6 +1,6 @@
 # Voxel Canvas - Three.js
 
-> Lightweight, procedural voxel river environment inspired by the Brazilian Pantanal. Features underwater depth fog, adaptive terrain, probabilistic forest growth, lily pads, and optional skybox – all in pure **Three.js**.
+> Lightweight, procedural voxel river environment inspired by the Rio Cuiabá. Features underwater depth fog, adaptive terrain, probabilistic forest growth, lily pads, and optional skybox – all in pure **Three.js**.
 
 ![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)
 ![Three.js](https://img.shields.io/badge/Three.js-v0.154-000000?style=for-the-badge&logo=three.js&logoColor=white)
