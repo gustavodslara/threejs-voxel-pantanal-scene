@@ -12,6 +12,10 @@ const translations = {
   }
 };
 
+// Add vr instruction keys with a friendly short text
+translations['en-US'].vrInstructions = 'Enter VR via the button and use left thumbstick to move and fly.';
+translations['pt-BR'].vrInstructions = 'Entre no modo VR pelo botão e use o polegar esquerdo para mover e voar.';
+
 function detectLang() {
   const navLang = (navigator.language || navigator.userLanguage || 'en-US').toLowerCase();
   if (navLang.startsWith('pt')) return 'pt-BR';

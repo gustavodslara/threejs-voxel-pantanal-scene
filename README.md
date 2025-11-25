@@ -1,6 +1,6 @@
 # Pantanal Voxel River – 3D Procedural Scene
 
-> Lightweight, procedural voxel river environment inspired by the Brazilian Pantanal. Features underwater depth fog, adaptive terrain, probabilistic forest growth, lily pads, particles, and optional skybox – all in pure **Three.js**.
+> Lightweight, procedural voxel river environment inspired by the Brazilian Pantanal. Features underwater depth fog, adaptive terrain, probabilistic forest growth, lily pads, and optional skybox – all in pure **Three.js**.
 
 ![Three.js](https://img.shields.io/badge/Three.js-r160-000000?style=for-the-badge&logo=three.js&logoColor=white)
 ![JavaScript](https://img.shields.io/badge/JavaScript-ESModules-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)
@@ -21,7 +21,6 @@ This project renders a voxel-style river segment with:
 - Multi-type tree system (mega / large / normal / small twisted)
 - Hanging moss & vine detailing
 - Lily pad clusters for foreground interest
-- Ambient particle motes for subtle life
 - Optional cubemap or equirectangular skybox
 - Automatic language switching (pt-BR / en-US)
 
@@ -36,7 +35,6 @@ All authored in a single modular Three.js file – no build step required.
 - 🚀 High-performance instancing (batched by material, zero per-frame matrix churn)
 - 🌱 Probabilistic vegetation placement with spacing + rarity tiers
 - 🪵 Twisted branch micro-structure for small tree variation
-- 🐟 Ambient particle drift (lightweight BufferGeometry update)
 - 🪷 Lily pad voxel micro-geometry (thin volume elements)
 - 🌐 Skybox helper (cubemap or equirectangular)
 - 🔁 Clean resize & render loop with damped orbit controls
@@ -54,7 +52,6 @@ All authored in a single modular Three.js file – no build step required.
 | Fog | 28 planes, cubic opacity curve | Cheap volumetric depth masking |
 | Vegetation | Probability + distance rules | Biome density control |
 | Trees | Type-specific geometry strategies | Diversity + silhouette richness |
-| Particles | Static buffer + minor Y wobble | Ambient vitality |
 | Water | Single plane (translucent) | Surface reference & depth cover |
 | Skybox | CubeTexture/Equirect loader | Immersive environment backdrop |
 
@@ -145,7 +142,6 @@ Extend by adding language object + keys in `translations`.
 | Forest | `populateForest` | Probability curves, spacing, type ratios |
 | Water | `createWaterPlane` | Color, opacity, renderOrder |
 | Instances | batch creation | MAX_INSTANCES, shadow toggles |
-| Particles | `createParticles` | Count, motion amplitude |
 
 ---
 
@@ -156,6 +152,16 @@ Static module use requires an HTTP server:
 python -m http.server 8080
 ```
 Visit: `http://localhost:8080`
+
+## 🔎 VR / WebXR
+This project includes WebXR support. To use it:
+
+- Enter VR using the built-in VR button (appears if your browser/device supports WebXR).
+- Use the left controller's thumbstick to move and fly: pushing forward moves you forward; pushing up while forward enables flight (a small vertical component). The movement is smooth and sticky for comfortable control.
+
+Notes:
+- Some headsets/controllers map axes differently; the implementation attempts to automatically find the left stick axes.
+- Controller models will display in the scene to indicate active controllers.
 
 Add skybox assets under `textures/skybox/` or `textures/sky/` before uncommenting examples.
 

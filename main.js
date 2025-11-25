@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 
-// Loading management
 const loadingSpinner = document.getElementById('loading-spinner');
 let skyboxLoaded = false;
 let sceneReady = false;
@@ -12,16 +13,21 @@ function checkAndHideSpinner() {
     }
 }
 
-// Basic scene setup
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xc4d4b8); // soft daylight background
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+scene.background = new THREE.Color(0xc4d4b8);
+const container = document.getElementById('canvas-container');
+const camera = new THREE.PerspectiveCamera(45, (container && container.clientWidth) ? container.clientWidth / container.clientHeight : window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1)); // cap for perf
+renderer.setSize((container && container.clientWidth) ? container.clientWidth : window.innerWidth, (container && container.clientHeight) ? container.clientHeight : window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1)); 
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-document.getElementById('canvas-container').appendChild(renderer.domElement);
+container.appendChild(renderer.domElement);
+renderer.domElement.style.display = 'block';
+renderer.domElement.style.width = '100%';
+renderer.domElement.style.height = '100%';
+renderer.xr.enabled = true;
+document.body.appendChild(VRButton.createButton(renderer));
 
 camera.position.set(0, 12, -40);
 camera.lookAt(0, 12, -20);
@@ -31,7 +37,6 @@ controls.target.set(0, 12, -20);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
 
-// Lights
 scene.add(new THREE.AmbientLight(0xd4c4a8, 0.7));
 const dirLight = new THREE.DirectionalLight(0xfff4d4, 0.9);
 dirLight.position.set(15, 25, 10);
@@ -44,7 +49,11 @@ dirLight.shadow.mapSize.width = 1024;
 dirLight.shadow.mapSize.height = 1024;
 scene.add(dirLight);
 
-// Voxel + materials
+const player = new THREE.Group();
+player.position.copy(camera.position);
+player.add(camera);
+scene.add(player);
+
 const VOXEL_SIZE = 1;
 const voxelGeometry = new THREE.BoxGeometry(VOXEL_SIZE, VOXEL_SIZE, VOXEL_SIZE);
 const materials = {
@@ -63,48 +72,51 @@ const materials = {
     lilyPad: new THREE.MeshLambertMaterial({ color: 0x4a7a4a })
 };
 
-    // Skybox helpers
-    function setSkyboxFromCubemap(files) {
-        // files order: [px, nx, py, ny, pz, nz]
-        const loader = new THREE.CubeTextureLoader();
-        const cube = loader.load(files, () => {
-            skyboxLoaded = true;
-            checkAndHideSpinner();
-        });
-        cube.colorSpace = THREE.SRGBColorSpace;
-        scene.background = cube;
-        return cube;
-    }
-    function setSkyboxFromEquirect(url) {
-        const loader = new THREE.TextureLoader();
-        const tex = loader.load(url, () => {
-            skyboxLoaded = true;
-            checkAndHideSpinner();
-        });
-        tex.mapping = THREE.EquirectangularReflectionMapping;
-        tex.colorSpace = THREE.SRGBColorSpace;
-        scene.background = tex;
-        return tex;
-    }
+function setSkyboxFromCubemap(files) {
+    const loader = new THREE.CubeTextureLoader();
+    const cube = loader.load(files, () => {
+        skyboxLoaded = true;
+        checkAndHideSpinner();
+    });
+    cube.colorSpace = THREE.SRGBColorSpace;
+    scene.background = cube;
+    return cube;
+}
 
-// Instancing infra
+function setSkyboxFromEquirect(url) {
+    const loader = new THREE.TextureLoader();
+    const tex = loader.load(url, () => {
+        skyboxLoaded = true;
+        checkAndHideSpinner();
+    });
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    scene.background = tex;
+    return tex;
+}
+
 const instancedMeshes = {};
+
 const MAX_INSTANCES = 50000;
+
 function createInstancedMeshBatch(matName) {
     const mesh = new THREE.InstancedMesh(voxelGeometry, materials[matName], MAX_INSTANCES);
-    mesh.castShadow = false; // perf: no per-voxel shadow casting
+    mesh.castShadow = false;
     mesh.receiveShadow = true;
-    mesh.count = 0; // track used slots manually
+    mesh.count = 0; 
     instancedMeshes[matName].meshes.push(mesh);
     return mesh;
 }
+
 function initializeInstancedMeshes() {
     Object.keys(materials).forEach(name => {
         instancedMeshes[name] = { meshes: [], total: 0 };
         createInstancedMeshBatch(name);
     });
 }
+
 const tempMatrix = new THREE.Matrix4();
+
 function addVoxelInstance(x, y, z, matName) {
     const bucket = instancedMeshes[matName];
     if (!bucket) return;
@@ -115,26 +127,31 @@ function addVoxelInstance(x, y, z, matName) {
     mesh.count++;
     bucket.total++;
 }
+
 function createVoxel(x, y, z, material) { return { x, y, z, material }; }
+
 function addVoxelsToScene(voxels) {
-    voxels.forEach(v => {
+    const map = new Map();
+    for (const v of voxels) {
+        const key = `${v.x},${v.y},${v.z}`;
+        map.set(key, v);
+    }
+    for (const v of map.values()) {
         const matName = Object.keys(materials).find(k => materials[k] === v.material);
         if (matName) addVoxelInstance(v.x, v.y, v.z, matName);
-    });
+    }
 }
 
-// Water surface
 function createWaterPlane() {
     const geom = new THREE.PlaneGeometry(100, 100);
     const mat = new THREE.MeshLambertMaterial({ color: 0xb8945c, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false });
     const water = new THREE.Mesh(geom, mat);
     water.rotation.x = -Math.PI / 2;
     water.position.y = 0;
-    water.renderOrder = 2; // above fog layers
+    water.renderOrder = 2;
     return water;
 }
 
-// Underwater vertical fog (stacked planes)
 function createUnderwaterFogLayers() {
     const group = new THREE.Group();
     const RIVER_WIDTH = 52;
@@ -154,13 +171,12 @@ function createUnderwaterFogLayers() {
         );
         plane.rotation.x = -Math.PI / 2;
         plane.position.y = y;
-        plane.renderOrder = 1; // below water surface
+        plane.renderOrder = 1; 
         group.add(plane);
     }
     return group;
 }
 
-// Terrain (thin shell for land, solid fill for riverbed to avoid gaps)
 function createTerrain() {
     const voxels = [];
     const heightMap = {};
@@ -219,7 +235,6 @@ function createTerrain() {
     return { voxels, heightMap };
 }
 
-// Trees & vegetation
 function createTreeRoots(x, z) {
     const voxels = [];
     const count = Math.floor(Math.random() * 3) + 2;
@@ -235,6 +250,7 @@ function createTreeRoots(x, z) {
     }
     return voxels;
 }
+
 function createTreeTrunk(x, z, groundY, height, thickness, roots) {
     const voxels = [];
     if (roots) createTreeRoots(x, z).forEach(r => voxels.push(r));
@@ -247,6 +263,7 @@ function createTreeTrunk(x, z, groundY, height, thickness, roots) {
     }
     return voxels;
 }
+
 function createTreeFoliage(cx, topY, cz, radius, type) {
     const voxels = [];
     const layers = type === 'mega' ? 7 : type === 'large' ? 5 : type === 'small' ? 3 : 4;
@@ -279,6 +296,7 @@ function createTreeFoliage(cx, topY, cz, radius, type) {
     }
     return voxels;
 }
+
 function createTwistedBranches(x, z, groundY, height, branchCount) {
     const voxels = [];
     const trunkStraight = Math.floor(height * 0.4);
@@ -307,6 +325,7 @@ function createTwistedBranches(x, z, groundY, height, branchCount) {
     }
     return voxels;
 }
+
 function createTree(x, z, groundY, trunkHeight, foliageRadius, type, roots, twisted) {
     const voxels = [];
     if (twisted) {
@@ -332,14 +351,15 @@ function createTree(x, z, groundY, trunkHeight, foliageRadius, type, roots, twis
     }
     return voxels;
 }
+
 function populateForest(heightMap) {
     const voxels = [];
     const occupied = new Set();
     function tooClose(x, z, r) {
-        for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) if (occupied.has(`${x+dx},${z+dz}`)) return true;
+        for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) if (occupied.has(`${x + dx},${z + dz}`)) return true;
         return false;
     }
-    function mark(x, z, r) { for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) occupied.add(`${x+dx},${z+dz}`); }
+    function mark(x, z, r) { for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) occupied.add(`${x + dx},${z + dz}`); }
     for (let x = -50; x <= 50; x += 2) {
         for (let z = -50; z <= 50; z += 2) {
             const h = heightMap[`${x},${z}`];
@@ -352,10 +372,10 @@ function populateForest(heightMap) {
             if (Math.random() < prob) {
                 const r = Math.random();
                 let type, trunkHeight, foliageRadius, roots, spacing, twisted;
-                if (r < 0.12) { type='mega'; trunkHeight=Math.floor(Math.random()*6)+18; foliageRadius=Math.floor(Math.random()*2)+7; roots=Math.random()<0.6; spacing=8; twisted=false; }
-                else if (r < 0.30) { type='large'; trunkHeight=Math.floor(Math.random()*5)+13; foliageRadius=Math.floor(Math.random()*2)+5; roots=distRiver<23?true:Math.random()<0.35; spacing=6; twisted=false; }
-                else if (r < 0.55) { type='normal'; trunkHeight=Math.floor(Math.random()*4)+9; foliageRadius=Math.floor(Math.random()*2)+3; roots=false; spacing=4; twisted=false; }
-                else { type='small'; trunkHeight=Math.floor(Math.random()*4)+10; foliageRadius=Math.floor(Math.random()*2)+3; roots=false; spacing=4; twisted=true; }
+                if (r < 0.12) { type = 'mega'; trunkHeight = Math.floor(Math.random() * 6) + 18; foliageRadius = Math.floor(Math.random() * 2) + 7; roots = Math.random() < 0.6; spacing = 8; twisted = false; }
+                else if (r < 0.30) { type = 'large'; trunkHeight = Math.floor(Math.random() * 5) + 13; foliageRadius = Math.floor(Math.random() * 2) + 5; roots = distRiver < 23 ? true : Math.random() < 0.35; spacing = 6; twisted = false; }
+                else if (r < 0.55) { type = 'normal'; trunkHeight = Math.floor(Math.random() * 4) + 9; foliageRadius = Math.floor(Math.random() * 2) + 3; roots = false; spacing = 4; twisted = false; }
+                else { type = 'small'; trunkHeight = Math.floor(Math.random() * 4) + 10; foliageRadius = Math.floor(Math.random() * 2) + 3; roots = false; spacing = 4; twisted = true; }
                 if (!tooClose(x, z, spacing)) {
                     voxels.push(...createTree(x, z, h, trunkHeight, foliageRadius, type, roots, twisted));
                     mark(x, z, spacing);
@@ -366,7 +386,6 @@ function populateForest(heightMap) {
     return voxels;
 }
 
-// Lily pads
 function createThinLilyPad(x, y, z) {
     const g = new THREE.BoxGeometry(VOXEL_SIZE, 0.15, VOXEL_SIZE);
     const m = materials.lilyPad;
@@ -374,98 +393,160 @@ function createThinLilyPad(x, y, z) {
     mesh.position.set(x, y, z);
     return mesh;
 }
-function createLilyPad(x, z, size='cluster') {
+
+function createLilyPad(x, z, size = 'cluster') {
     const group = new THREE.Group();
     const y = 0;
     if (size === 'single') { group.add(createThinLilyPad(x, y, z)); }
     else {
         group.add(createThinLilyPad(x, y, z));
-        group.add(createThinLilyPad(x+1, y, z));
-        group.add(createThinLilyPad(x, y, z+1));
-        group.add(createThinLilyPad(x+1, y, z+1));
+        group.add(createThinLilyPad(x + 1, y, z));
+        group.add(createThinLilyPad(x, y, z + 1));
+        group.add(createThinLilyPad(x + 1, y, z + 1));
     }
     return group;
 }
+
 function createLilyPads() {
     const group = new THREE.Group();
     const pads = [
-        { x:-18.5,z:26,size:'single'},{x:-15,z:27.5,size:'cluster'},{x:-17,z:29,size:'single'},
-        { x:17,z:-48,size:'cluster'},{x:15.5,z:-46,size:'single'},{x:18,z:-44.5,size:'single'}
+        { x: -18.5, z: 26, size: 'single' }, { x: -15, z: 27.5, size: 'cluster' }, { x: -17, z: 29, size: 'single' },
+        { x: 17, z: -48, size: 'cluster' }, { x: 15.5, z: -46, size: 'single' }, { x: 18, z: -44.5, size: 'single' }
     ];
     pads.forEach(p => group.add(createLilyPad(p.x, p.z, p.size)));
     return group;
 }
 
-// Particles
-function createParticles() {
-    const g = new THREE.BufferGeometry();
-    const count = 150;
-    const positions = new Float32Array(count * 3);
-    for (let i=0;i<count;i++) {
-        positions[i*3] = (Math.random()-0.5)*50;
-        positions[i*3+1] = Math.random()*15+2;
-        positions[i*3+2] = (Math.random()-0.5)*50;
-    }
-    g.setAttribute('position', new THREE.BufferAttribute(positions,3));
-    const m = new THREE.PointsMaterial({ color:0xf4e4c4,size:0.12,transparent:true,opacity:0.6,blending:THREE.AdditiveBlending });
-    return new THREE.Points(g,m);
-}
-
-// Build world (wrapped to mark as ready when complete)
 function buildWorld() {
     initializeInstancedMeshes();
     const terrain = createTerrain();
     const forest = populateForest(terrain.heightMap);
     addVoxelsToScene([...terrain.voxels, ...forest]);
-    Object.values(instancedMeshes).forEach(bucket => bucket.meshes.forEach(mesh => { if (mesh.count>0){ mesh.instanceMatrix.needsUpdate=true; scene.add(mesh);} }));
+    Object.values(instancedMeshes).forEach(bucket => bucket.meshes.forEach(mesh => { if (mesh.count > 0) { mesh.instanceMatrix.needsUpdate = true; scene.add(mesh); } }));
 
     const water = createWaterPlane();
     const fogLayers = createUnderwaterFogLayers();
     const lilyPads = createLilyPads();
-    const particles = createParticles();
-    scene.add(fogLayers, water, lilyPads, particles);
+    scene.add(fogLayers, water, lilyPads);
+    if (!scene.children.includes(player)) scene.add(player);
 
-    // Mark scene as ready after everything is built
     sceneReady = true;
     checkAndHideSpinner();
-    
-    return particles; // Return particles for animation
+
 }
 
-const particles = buildWorld();
-
-// setSkyboxFromCubemap([
-//   'textures/skybox/px.jpg', // +X
-//   'textures/skybox/nx.jpg', // -X
-//   'textures/skybox/py.jpg', // +Y
-//   'textures/skybox/ny.jpg', // -Y
-//   'textures/skybox/pz.jpg', // +Z
-//   'textures/skybox/nz.jpg'  // -Z
-// ]);
-
+buildWorld();
 setSkyboxFromEquirect('skybox.jpeg');
 
-// Animation loop
-let t = 0;
 function animate() {
     requestAnimationFrame(animate);
-    t += 0.01;
-    const pos = particles.geometry.attributes.position.array;
-    for (let i=1;i<pos.length;i+=3) {
-        pos[i] += Math.sin(t + i)*0.01;
-        if (pos[i] > 20) pos[i] = 0;
+    if (renderer.xr.isPresenting) {
+        controls.enabled = false;
+    } else {
+        controls.enabled = true;
+        controls.update();
     }
-    particles.geometry.attributes.position.needsUpdate = true;
-    particles.rotation.y += 0.0005;
-    controls.update();
+    updateXRMovement();
     renderer.render(scene, camera);
 }
-animate();
 
-// Resize handling
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
+function resize() {
+    const w = container.clientWidth || window.innerWidth;
+    const h = container.clientHeight || window.innerHeight;
+    camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setSize(w, h);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1));
-});
+}
+
+window.addEventListener('resize', resize);
+if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', resize);
+    window.visualViewport.addEventListener('scroll', resize);
+}
+resize();
+
+const clock = new THREE.Clock();
+const controllerModelFactory = new XRControllerModelFactory();
+let leftController = null;
+let rightController = null;
+let leftProxy = null;
+const stickState = { x: 0, y: 0, xSmoothed: 0, ySmoothed: 0 };
+const movementParams = { speed: 8.0, flySpeed: 4.0, smoothing: 0.16 };
+
+function setupXRControllers() {
+    const controller0 = renderer.xr.getController(0);
+    const controller1 = renderer.xr.getController(1);
+    function onConnected(evt) {
+        const handedness = evt.data.handedness || (evt.data && evt.data.handedness) || 'unknown';
+        if (handedness === 'left') {
+            leftController = this;
+            leftProxy = new THREE.Object3D();
+            leftProxy.name = 'left_proxy';
+            scene.add(leftProxy);
+            const grip = renderer.xr.getControllerGrip(0);
+            grip.add(controllerModelFactory.createControllerModel(grip));
+        } else if (handedness === 'right') {
+            rightController = this;
+            const grip = renderer.xr.getControllerGrip(1);
+            grip.add(controllerModelFactory.createControllerModel(grip));
+        }
+    }
+    function onDisconnected(evt) {
+        if (leftController === this) leftController = null;
+        if (rightController === this) rightController = null;
+    }
+    controller0.addEventListener('connected', onConnected);
+    controller0.addEventListener('disconnected', onDisconnected);
+    controller1.addEventListener('connected', onConnected);
+    controller1.addEventListener('disconnected', onDisconnected);
+    scene.add(controller0);
+    scene.add(controller1);
+    const grip0 = renderer.xr.getControllerGrip(0);
+    const grip1 = renderer.xr.getControllerGrip(1);
+    grip0.add(controllerModelFactory.createControllerModel(grip0));
+    grip1.add(controllerModelFactory.createControllerModel(grip1));
+    scene.add(grip0);
+    scene.add(grip1);
+}
+
+function updateXRMovement() {
+    const delta = clock.getDelta();
+    if (!renderer.xr.isPresenting) return;
+    if (!leftController || !leftController.inputSource || !leftController.inputSource.gamepad) {
+        return;
+    }
+    const gp = leftController.inputSource.gamepad;
+    if (!gp || !gp.axes) return;
+    const axes = gp.axes;
+    let ax = 0, ay = 0;
+    if (axes.length >= 4) {
+        ax = axes[2]; 
+        ay = axes[3]; 
+    } else {
+        ax = axes[0];
+        ay = axes[1];
+    }
+    stickState.xSmoothed += (ax - stickState.xSmoothed) * movementParams.smoothing;
+    stickState.ySmoothed += (ay - stickState.ySmoothed) * movementParams.smoothing;
+
+    const camQuat = camera.quaternion.clone();
+    const euler = new THREE.Euler().setFromQuaternion(camQuat, 'YXZ');
+    const yawQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, euler.y, 0));
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(yawQuat).normalize();
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(yawQuat).normalize();
+
+    const forwardSpeed = -stickState.ySmoothed * movementParams.speed * delta;
+    const strafeSpeed = stickState.xSmoothed * movementParams.speed * delta;
+    const flySpeedY = -stickState.ySmoothed * movementParams.flySpeed * delta * 0.5;
+
+    const move = new THREE.Vector3();
+    move.add(forward.clone().multiplyScalar(forwardSpeed));
+    move.add(right.clone().multiplyScalar(strafeSpeed));
+    move.y += flySpeedY;
+
+    player.position.add(move);
+}
+
+setupXRControllers();
+animate();
